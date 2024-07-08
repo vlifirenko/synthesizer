@@ -43,13 +43,94 @@ double osc(double dHertz, double dTime, int nType)
    }
 }
 
+struct sEnvelopeADSR
+{
+   double dAttackTime;
+   double dDecayTime;
+   double dReleaseTime;
+
+   double dSustainAmplitude;
+   double dStartAmplitude;
+
+   double dTriggerOnTime;
+   double dTriggerOffTime;
+
+   bool bNoteOn;
+
+   sEnvelopeADSR()
+   {
+      dAttackTime = 0.100;
+      dDecayTime = 0.01;
+      dStartAmplitude = 1.0;
+      dSustainAmplitude = 0.8;
+      dReleaseTime = 0.200;
+      dTriggerOnTime = 0.0;
+      dTriggerOffTime = 0.0;
+      bNoteOn = false;
+   }
+
+   double GetAmplitude(double dTime)
+   {
+      double dAmplitude = 0.0;
+      double dLifeTime = dTime - dTriggerOnTime;
+
+      if (bNoteOn)
+      {
+         // ADS
+
+         // attack
+         if (dLifeTime <= dAttackTime)
+            dAmplitude = (dLifeTime / dAttackTime) * dStartAmplitude;
+
+         // decay
+         if (dLifeTime > dAttackTime && dLifeTime <= (dAttackTime + dDecayTime))
+            dAmplitude = ((dLifeTime - dAttackTime) / dDecayTime) * (dSustainAmplitude - dStartAmplitude)
+               + dStartAmplitude;
+
+         // sustain
+         if (dLifeTime > (dAttackTime + dDecayTime))
+         {
+            dAmplitude = dSustainAmplitude;
+         }
+
+      }
+      else
+      {
+         // release
+         dAmplitude = ((dTime - dTriggerOffTime) / dReleaseTime) * (0.0 - dSustainAmplitude) + dSustainAmplitude;
+      }
+
+      if (dAmplitude < 0.0001)
+         dAmplitude = 0;
+
+      return dAmplitude;
+   }
+
+   void NoteOn(double dTimeOn)
+   {
+      dTriggerOnTime = dTimeOn;
+      bNoteOn = true;
+   }
+
+   void NoteOff(double dTimeOff)
+   {
+      dTriggerOffTime = dTimeOff;
+      bNoteOn = false;
+   }
+};
+
 atomic<double> dFrequencyOutput = 0.0;
 double dOctaveBaseFrequency = 110.0;   // A2
 double d12thRootOf2 = pow(2.0, 1.0 / 12.0);
+sEnvelopeADSR envelope;
 
 double MakeNoise(double dTime)
 {
-   double dOutput = osc(dFrequencyOutput, dTime, 3);
+   double dOutput = envelope.GetAmplitude(dTime) *
+      (
+         + osc(dFrequencyOutput * 0.5, dTime, 3)
+         + osc(dFrequencyOutput * 1.0, dTime, 1)
+      );
 
    return dOutput * 0.4;
 }
@@ -62,8 +143,8 @@ int main()
    vector<wstring> devices = olcNoiseMaker<short>::Enumerate();
 
    // display findings
-   for (auto d : devices)
-      wcout << "Found output device:" << d << endl;
+   //for (auto d : devices)
+   //   wcout << "Found output device:" << d << endl;
 
    // create noise machine
    olcNoiseMaker<short> sound(devices[0], 44100, 1, 8, 512);
@@ -71,23 +152,37 @@ int main()
    // link noise function with sound machine
    sound.SetUserFunction(MakeNoise);
 
+   // keyboard
+   int nCurrentKey = -1;
+   bool bKeyPressed = false;
+
    while (1)
    {
-      // keyboard
-
-      bool bKeyPressed = false;
+      bKeyPressed = false;
       for (int k = 0; k < 15; k++)
       {
          if (GetAsyncKeyState((unsigned char)("ZSXCFVGBNJMK\xbcL\xbe"[k])) & 0x8000)
          {
-            dFrequencyOutput = dOctaveBaseFrequency * pow(d12thRootOf2, k);
+            if (nCurrentKey != k)
+            {
+               dFrequencyOutput = dOctaveBaseFrequency * pow(d12thRootOf2, k);
+               envelope.NoteOn(sound.GetTime());
+               wcout << "\rNote On: " << sound.GetTime() << "s " << dFrequencyOutput << "Hz";
+               nCurrentKey = k;
+            }
+
             bKeyPressed = true;
          }
       }
 
       if (!bKeyPressed)
       {
-         dFrequencyOutput = 0.0;
+         if (nCurrentKey != -1)
+         {
+            wcout << "\rNote Off: " << sound.GetTime() << "s                              ";
+            envelope.NoteOff(sound.GetTime());
+            nCurrentKey = -1;
+         }
       }
    }
 
