@@ -3,16 +3,42 @@ using namespace std;
 
 #include "olcNoiseMaker.h"
 
+// converts freq to angular velocity
+double w(double dHertz)
+{
+   return dHertz * 2.0 * PI;
+}
+
+double osc(double dHertz, double dTime, int nType)
+{
+   switch (nType)
+   {
+   case 0:
+      return sin(w(dHertz) * dTime);
+   case 1:
+      return sin(w(dHertz) * dTime) > 0.0 ? 1.0 : -1.0;
+
+   default:
+      return 0;
+   }
+}
+
 atomic<double> dFrequencyOutput = 0.0;
+double dOctaveBaseFrequency = 110.0;   // A2
+double d12thRootOf2 = pow(2.0, 1.0 / 12.0);
 
 double MakeNoise(double dTime)
 {
-   double dOutput = 1.0 * sin(dFrequencyOutput * 2 * 3.14159 * dTime);
+   double dOutput = 1.0 * (sin(w(dFrequencyOutput) * dTime));
 
-   if (dOutput > 0.0)
-      return 0.2;
-   else
-      return -0.2;
+   //+ sin((dFrequencyOutput + 20.0) * 2 * 3.14159 * dTime));
+
+   return dOutput * 0.4;
+   
+   //if (dOutput > 0.0)
+   //   return 0.2;
+   //else
+   //   return -0.2;
 }
 
 int main()
@@ -31,9 +57,6 @@ int main()
 
    // link noise function with sound machine
    sound.SetUserFunction(MakeNoise);
-
-   double dOctaveBaseFrequency = 110.0;   // A2
-   double d12thRootOf2 = pow(2.0, 1.0 / 12.0);
 
    while (1)
    {
