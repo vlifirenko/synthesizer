@@ -13,10 +13,30 @@ double osc(double dHertz, double dTime, int nType)
 {
    switch (nType)
    {
-   case 0:
+   case 0:  // square
       return sin(w(dHertz) * dTime);
-   case 1:
+   
+   case 1:  // wave
       return sin(w(dHertz) * dTime) > 0.0 ? 1.0 : -1.0;
+
+   case 2:  // triangle
+      return asin(sin(w(dHertz) * dTime)) * (2.0 / PI);
+
+   case 3:  // saw (analogue / warm / slow)
+   {
+      double dOutput = 0.0;
+
+      for (double n = 1.0; n < 10.0; n++)
+         dOutput += (sin(n * w(dHertz) * dTime)) / n;
+
+      return dOutput * (2.0 / PI);
+   }
+
+   case 4:  // saw (optimised / harsh / fast)
+      return (2.0 / PI) * (dHertz * PI * fmod(dTime, 1.0 / dHertz) - (PI / 2.0));
+
+   case 5:  // pseudo random noise
+      return 2.0 * ((double)rand() / (double)RAND_MAX) - 1.0;
 
    default:
       return 0;
@@ -29,16 +49,9 @@ double d12thRootOf2 = pow(2.0, 1.0 / 12.0);
 
 double MakeNoise(double dTime)
 {
-   double dOutput = 1.0 * (sin(w(dFrequencyOutput) * dTime));
-
-   //+ sin((dFrequencyOutput + 20.0) * 2 * 3.14159 * dTime));
+   double dOutput = osc(dFrequencyOutput, dTime, 3);
 
    return dOutput * 0.4;
-   
-   //if (dOutput > 0.0)
-   //   return 0.2;
-   //else
-   //   return -0.2;
 }
 
 int main()
