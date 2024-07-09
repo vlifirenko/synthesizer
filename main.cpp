@@ -68,11 +68,11 @@ struct sEnvelopeADSR
 
    sEnvelopeADSR()
    {
-      dAttackTime = 0.100;
-      dDecayTime = 0.01;
+      dAttackTime = 0.01;
+      dDecayTime = 1.0;
       dStartAmplitude = 1.0;
-      dSustainAmplitude = 0.8;
-      dReleaseTime = 0.200;
+      dSustainAmplitude = 0.0;
+      dReleaseTime = 1.0;
       dTriggerOnTime = 0.0;
       dTriggerOffTime = 0.0;
       bNoteOn = false;
@@ -128,18 +128,77 @@ struct sEnvelopeADSR
    }
 };
 
+struct instrument
+{
+   double dVolume;
+   sEnvelopeADSR env;
+
+   virtual double sound(double dTime, double dFrequency) = 0;
+};
+
+struct bell : public instrument
+{
+   bell()
+   {
+      env.dAttackTime = 0.01;
+      env.dDecayTime = 1.0;
+      env.dStartAmplitude = 1.0;
+      env.dSustainAmplitude = 0.0;
+      env.dReleaseTime = 1.0;
+      env.dTriggerOnTime = 0.0;
+      env.dTriggerOffTime = 0.0;
+   }
+
+   double sound(double dTime, double dFrequency)
+   {
+      double dOutput = env.GetAmplitude(dTime) *
+         (
+            +1.0 * osc(dFrequency * 2.0, dTime, OSC_SINE, 5.0, 0.001)
+            + 0.5 * osc(dFrequency * 3.0, dTime, OSC_SINE)
+            + 0.25 * osc(dFrequency * 4.0, dTime, OSC_SINE)
+          );
+
+      return dOutput;
+   }
+};
+
+struct harmonica : public instrument
+{
+   harmonica()
+   {
+      env.dAttackTime = 0.01;
+      env.dDecayTime = 1.0;
+      env.dStartAmplitude = 1.0;
+      env.dSustainAmplitude = 0.0;
+      env.dReleaseTime = 1.0;
+      env.dTriggerOnTime = 0.0;
+      env.dTriggerOffTime = 0.0;
+   }
+
+   double sound(double dTime, double dFrequency)
+   {
+      double dOutput = env.GetAmplitude(dTime) *
+         (
+            +1.0 * osc(dFrequency, dTime, OSC_SQUARE, 5.0, 0.001)
+            + 0.5 * osc(dFrequency * 1.5, dTime, OSC_SQUARE)
+            + 0.25 * osc(dFrequency * 2.0, dTime, OSC_SQUARE)
+            + 0.05 * osc(0, dTime, OSC_NOISE)
+            );
+
+      return dOutput;
+   }
+};
+
 atomic<double> dFrequencyOutput = 0.0;
 double dOctaveBaseFrequency = 220.0;   // A3
 double d12thRootOf2 = pow(2.0, 1.0 / 12.0);
 sEnvelopeADSR envelope;
 
+instrument *voice = nullptr;
+
 double MakeNoise(double dTime)
 {
-   double dOutput = envelope.GetAmplitude(dTime) *
-      (
-         +1.0 * osc(dFrequencyOutput, dTime, OSC_SQUARE, 5.0, 0.01)
-      );
-
+   double dOutput = voice->sound(dTime, dFrequencyOutput);
    return dOutput * 0.4;
 }
 
@@ -156,6 +215,9 @@ int main()
 
    // create noise machine
    olcNoiseMaker<short> sound(devices[0], 44100, 1, 8, 512);
+
+   //voice = new bell();
+   voice = new harmonica();
 
    // link noise function with sound machine
    sound.SetUserFunction(MakeNoise);
@@ -174,7 +236,7 @@ int main()
             if (nCurrentKey != k)
             {
                dFrequencyOutput = dOctaveBaseFrequency * pow(d12thRootOf2, k);
-               envelope.NoteOn(sound.GetTime());
+               voice->env.NoteOn(sound.GetTime());
                wcout << "\rNote On: " << sound.GetTime() << "s " << dFrequencyOutput << "Hz";
                nCurrentKey = k;
             }
@@ -188,7 +250,7 @@ int main()
          if (nCurrentKey != -1)
          {
             wcout << "\rNote Off: " << sound.GetTime() << "s                              ";
-            envelope.NoteOff(sound.GetTime());
+            voice->env.NoteOff(sound.GetTime());
             nCurrentKey = -1;
          }
       }
