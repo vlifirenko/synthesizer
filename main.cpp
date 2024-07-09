@@ -16,25 +16,27 @@ double w(double dHertz)
 #define OSC_SAW_DIG 4
 #define OSC_NOISE 5
 
-double osc(double dHertz, double dTime, int nType = OSC_SINE)
+double osc(double dHertz, double dTime, int nType = OSC_SINE, double dLFOHertz = 0.0, double dLFOAmplitude = 0.0)
 {
+   double dFreq = w(dHertz) * dTime + dLFOAmplitude * dHertz * sin(w(dLFOHertz) * dTime);
+
    switch (nType)
    {
    case OSC_SINE:  // sin
-      return sin(w(dHertz) * dTime + 0.01 * dHertz * sin(w(5.0) * dTime));
+      return sin(dFreq);
    
    case OSC_SQUARE:  // square
-      return sin(w(dHertz) * dTime) > 0.0 ? 1.0 : -1.0;
+      return sin(dFreq) > 0.0 ? 1.0 : -1.0;
 
    case OSC_TRIANGLE:  // triangle
-      return asin(sin(w(dHertz) * dTime)) * (2.0 / PI);
+      return asin(sin(dFreq) * (2.0 / PI));
 
    case OSC_SAW_ANA:  // saw (analogue / warm / slow)
    {
       double dOutput = 0.0;
 
       for (double n = 1.0; n < 10.0; n++)
-         dOutput += (sin(n * w(dHertz) * dTime)) / n;
+         dOutput += (sin(n * dFreq)) / n;
 
       return dOutput * (2.0 / PI);
    }
@@ -135,8 +137,7 @@ double MakeNoise(double dTime)
 {
    double dOutput = envelope.GetAmplitude(dTime) *
       (
-         //+ osc(dFrequencyOutput * 0.5, dTime, 3)
-         + 1.0 * osc(dFrequencyOutput, dTime, OSC_SINE)
+         +1.0 * osc(dFrequencyOutput, dTime, OSC_SQUARE, 5.0, 0.01)
       );
 
    return dOutput * 0.4;
