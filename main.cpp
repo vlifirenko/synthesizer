@@ -1,259 +1,398 @@
 #include <iostream>
 using namespace std;
 
+#define FTYPE double
 #include "olcNoiseMaker.h"
 
-// converts freq to angular velocity
-double w(double dHertz)
+namespace synth
 {
-   return dHertz * 2.0 * PI;
-}
 
-#define OSC_SINE 0
-#define OSC_SQUARE 1
-#define OSC_TRIANGLE 2
-#define OSC_SAW_ANA 3
-#define OSC_SAW_DIG 4
-#define OSC_NOISE 5
-
-double osc(double dHertz, double dTime, int nType = OSC_SINE, double dLFOHertz = 0.0, double dLFOAmplitude = 0.0)
-{
-   double dFreq = w(dHertz) * dTime + dLFOAmplitude * dHertz * sin(w(dLFOHertz) * dTime);
-
-   switch (nType)
+   // converts freq to angular velocity
+   FTYPE w(FTYPE dHertz)
    {
-   case OSC_SINE:  // sin
-      return sin(dFreq);
-   
-   case OSC_SQUARE:  // square
-      return sin(dFreq) > 0.0 ? 1.0 : -1.0;
-
-   case OSC_TRIANGLE:  // triangle
-      return asin(sin(dFreq) * (2.0 / PI));
-
-   case OSC_SAW_ANA:  // saw (analogue / warm / slow)
-   {
-      double dOutput = 0.0;
-
-      for (double n = 1.0; n < 10.0; n++)
-         dOutput += (sin(n * dFreq)) / n;
-
-      return dOutput * (2.0 / PI);
+      return dHertz * 2.0 * PI;
    }
 
-   case OSC_SAW_DIG:  // saw (optimised / harsh / fast)
-      return (2.0 / PI) * (dHertz * PI * fmod(dTime, 1.0 / dHertz) - (PI / 2.0));
-
-   case OSC_NOISE:  // pseudo random noise
-      return 2.0 * ((double)rand() / (double)RAND_MAX) - 1.0;
-
-   default:
-      return 0;
-   }
-}
-
-struct sEnvelopeADSR
-{
-   double dAttackTime;
-   double dDecayTime;
-   double dReleaseTime;
-
-   double dSustainAmplitude;
-   double dStartAmplitude;
-
-   double dTriggerOnTime;
-   double dTriggerOffTime;
-
-   bool bNoteOn;
-
-   sEnvelopeADSR()
+   // basic note
+   struct note
    {
-      dAttackTime = 0.01;
-      dDecayTime = 1.0;
-      dStartAmplitude = 1.0;
-      dSustainAmplitude = 0.0;
-      dReleaseTime = 1.0;
-      dTriggerOnTime = 0.0;
-      dTriggerOffTime = 0.0;
-      bNoteOn = false;
-   }
+      int id;     // position in scale
+      FTYPE on;
+      FTYPE off;
+      bool active;
+      int channel;
 
-   double GetAmplitude(double dTime)
-   {
-      double dAmplitude = 0.0;
-      double dLifeTime = dTime - dTriggerOnTime;
-
-      if (bNoteOn)
+      note()
       {
-         // ADS
+         id = 0;
+         on = 0.0;
+         off = 0.0;
+         active = false;
+         channel = 0;
+      }
+   };
 
-         // attack
-         if (dLifeTime <= dAttackTime)
-            dAmplitude = (dLifeTime / dAttackTime) * dStartAmplitude;
+   const int OSC_SINE = 0;
+   const int OSC_SQUARE = 1;
+   const int OSC_TRIANGLE = 2;
+   const int OSC_SAW_ANA = 3;
+   const int OSC_SAW_DIG = 4;
+   const int OSC_NOISE = 5;
 
-         // decay
-         if (dLifeTime > dAttackTime && dLifeTime <= (dAttackTime + dDecayTime))
-            dAmplitude = ((dLifeTime - dAttackTime) / dDecayTime) * (dSustainAmplitude - dStartAmplitude)
-               + dStartAmplitude;
+   FTYPE osc(const FTYPE dHertz, const FTYPE dTime, const int nType = OSC_SINE,
+      const FTYPE dLFOHertz = 0.0, const FTYPE dLFOAmplitude = 0.0, FTYPE dCustom = 50.0)
+   {
+      FTYPE dFreq = w(dHertz) * dTime + dLFOAmplitude * dHertz * (sin(w(dLFOHertz) * dTime));
 
-         // sustain
-         if (dLifeTime > (dAttackTime + dDecayTime))
+      switch (nType)
+      {
+      case OSC_SINE:  // sin
+         return sin(dFreq);
+
+      case OSC_SQUARE:  // square
+         return sin(dFreq) > 0.0 ? 1.0 : -1.0;
+
+      case OSC_TRIANGLE:  // triangle
+         return asin(sin(dFreq) * (2.0 / PI));
+
+      case OSC_SAW_ANA:  // saw (analogue / warm / slow)
+      {
+         FTYPE dOutput = 0.0;
+
+         for (FTYPE n = 1.0; n < 10.0; n++)
+            dOutput += (sin(n * dFreq)) / n;
+
+         return dOutput * (2.0 / PI);
+      }
+
+      case OSC_SAW_DIG:  // saw (optimised / harsh / fast)
+         return (2.0 / PI) * (dHertz * PI * fmod(dTime, 1.0 / dHertz) - (PI / 2.0));
+
+      case OSC_NOISE:  // pseudo random noise
+         return 2.0 * ((double)rand() / (double)RAND_MAX) - 1.0;
+
+      default:
+         return 0.0;
+      }
+   }
+
+   const int SCALE_DEFAULT = 0;
+
+   FTYPE scale(const int nNoteID, const int nScaleID = SCALE_DEFAULT)
+   {
+      switch (nScaleID)
+      {
+      case SCALE_DEFAULT: default:
+         return 256 * pow(1.0594630943592952645618252949463, nNoteID);
+      }
+   }
+
+   struct envelope
+   {
+      virtual FTYPE amplitude(const FTYPE dTime, const FTYPE dTimeOn, const FTYPE dTimeOff) = 0;
+   };
+
+   struct envelope_adsr : public envelope
+   {
+      FTYPE dAttackTime;
+      FTYPE dDecayTime;
+      FTYPE dReleaseTime;
+      FTYPE dSustainAmplitude;
+      FTYPE dStartAmplitude;
+
+      envelope_adsr()
+      {
+         dAttackTime = 0.1;
+         dDecayTime = 0.1;
+         dSustainAmplitude = 1.0;
+         dReleaseTime = 0.2;
+         dStartAmplitude = 1.0;
+      }
+
+      virtual FTYPE amplitude(const FTYPE dTime, const FTYPE dTimeOn, const FTYPE dTimeOff)
+      {
+         FTYPE dAmplitude = 0.0;
+         FTYPE dReleaseAmplitude = 0.0;
+
+         if (dTimeOn > dTimeOff)   // note is on
          {
-            dAmplitude = dSustainAmplitude;
+            FTYPE dLifeTime = dTime - dTimeOn;
+
+				if (dLifeTime <= dAttackTime)
+					dAmplitude = (dLifeTime / dAttackTime) * dStartAmplitude;
+
+				if (dLifeTime > dAttackTime && dLifeTime <= (dAttackTime + dDecayTime))
+					dAmplitude = ((dLifeTime - dAttackTime) / dDecayTime) * (dSustainAmplitude - dStartAmplitude) + dStartAmplitude;
+
+				if (dLifeTime > (dAttackTime + dDecayTime))
+					dAmplitude = dSustainAmplitude;
+
+         }
+         else  // note is off
+         {
+            FTYPE dLifeTime = dTimeOff - dTimeOn;
+
+				if (dLifeTime <= dAttackTime)
+					dReleaseAmplitude = (dLifeTime / dAttackTime) * dStartAmplitude;
+
+				if (dLifeTime > dAttackTime && dLifeTime <= (dAttackTime + dDecayTime))
+					dReleaseAmplitude = ((dLifeTime - dAttackTime) / dDecayTime) * (dSustainAmplitude - dStartAmplitude) + dStartAmplitude;
+
+				if (dLifeTime > (dAttackTime + dDecayTime))
+					dReleaseAmplitude = dSustainAmplitude;
+
+				dAmplitude = ((dTime - dTimeOff) / dReleaseTime) * (0.0 - dReleaseAmplitude) + dReleaseAmplitude;
          }
 
+         if (dAmplitude <= 0.000)
+            dAmplitude = 0.0;
+
+         return dAmplitude;
       }
-      else
+   };
+
+   FTYPE env(const FTYPE dTime, envelope& env, const FTYPE dTimeOn, const FTYPE dTimeOff)
+   {
+      return env.amplitude(dTime, dTimeOn, dTimeOff);
+   }
+
+   struct instrument_base
+   {
+      double dVolume;
+      synth::envelope_adsr env;
+
+      virtual double sound(const FTYPE dTime, synth::note n, bool& bNoteFinished) = 0;
+   };
+
+   struct instrument_bell : public instrument_base
+   {
+      instrument_bell()
       {
-         // release
-         dAmplitude = ((dTime - dTriggerOffTime) / dReleaseTime) * (0.0 - dSustainAmplitude) + dSustainAmplitude;
+         env.dAttackTime = 0.01;
+         env.dDecayTime = 1.0;
+         env.dSustainAmplitude = 0.0;
+         env.dReleaseTime = 1.0;
+
+         dVolume = 1.0;
       }
 
-      if (dAmplitude < 0.0001)
-         dAmplitude = 0;
+      virtual FTYPE sound(const FTYPE dTime, synth::note n, bool &bNoteFinished)
+      {
+         FTYPE dAmplitude = synth::env(dTime, env, n.on, n.off);
+         if (dAmplitude <= 0.0)
+            bNoteFinished = true;
 
-      return dAmplitude;
-   }
+         FTYPE dSound =
+            +1.00 * synth::osc(n.on - dTime, synth::scale(n.id + 12), synth::OSC_SINE, 5.0, 0.001)
+            + 0.50 * synth::osc(n.on - dTime, synth::scale(n.id + 24))
+            + 0.25 * synth::osc(n.on - dTime, synth::scale(n.id + 36));
 
-   void NoteOn(double dTimeOn)
+         return dAmplitude * dSound * dVolume;
+      }
+   };
+
+   struct instrument_bell8 : public instrument_base
    {
-      dTriggerOnTime = dTimeOn;
-      bNoteOn = true;
-   }
+      instrument_bell8()
+      {
+         env.dAttackTime = 0.01;
+         env.dDecayTime = 0.5;
+         env.dSustainAmplitude = 0.8;
+         env.dReleaseTime = 1.0;
 
-   void NoteOff(double dTimeOff)
+         dVolume = 1.0;
+      }
+
+      virtual FTYPE sound(const FTYPE dTime, synth::note n, bool &bNoteFinished)
+      {
+         FTYPE dAmplitude = synth::env(dTime, env, n.on, n.off);
+         if (dAmplitude <= 0.0) bNoteFinished = true;
+
+         FTYPE dSound =
+            +1.00 * synth::osc(n.on - dTime, synth::scale(n.id), synth::OSC_SQUARE, 5.0, 0.001)
+            + 0.50 * synth::osc(n.on - dTime, synth::scale(n.id + 12))
+            + 0.25 * synth::osc(n.on - dTime, synth::scale(n.id + 24));
+
+         return dAmplitude * dSound * dVolume;
+      }
+
+   };
+
+   struct instrument_harmonica : public instrument_base
    {
-      dTriggerOffTime = dTimeOff;
-      bNoteOn = false;
-   }
-};
+      instrument_harmonica()
+      {
+         env.dAttackTime = 0.05;
+         env.dDecayTime = 1.0;
+         env.dSustainAmplitude = 0.95;
+         env.dReleaseTime = 0.1;
 
-struct instrument
+         dVolume = 1.0;
+      }
+
+      virtual FTYPE sound(const FTYPE dTime, synth::note n, bool &bNoteFinished)
+      {
+         FTYPE dAmplitude = synth::env(dTime, env, n.on, n.off);
+         if (dAmplitude <= 0.0) bNoteFinished = true;
+
+         FTYPE dSound =
+            //+ 1.0  * synth::osc(n.on - dTime, synth::scale(n.id-12), synth::OSC_SAW_ANA, 5.0, 0.001, 100)
+            +1.00 * synth::osc(n.on - dTime, synth::scale(n.id), synth::OSC_SQUARE, 5.0, 0.001)
+            + 0.50 * synth::osc(n.on - dTime, synth::scale(n.id + 12), synth::OSC_SQUARE)
+            + 0.05 * synth::osc(n.on - dTime, synth::scale(n.id + 24), synth::OSC_NOISE);
+
+         return dAmplitude * dSound * dVolume;
+      }
+
+   };
+
+}
+
+vector<synth::note> vecNotes;
+mutex muxNotes;
+synth::instrument_bell instBell;
+synth::instrument_harmonica instHarm;
+
+
+typedef bool(*lambda)(synth::note const& item);
+template<class T>
+void safe_remove(T& v, lambda f)
 {
-   double dVolume;
-   sEnvelopeADSR env;
+   auto n = v.begin();
+   while (n != v.end())
+   {
+      if (!f(*n))
+         n = v.erase(n);
+      else
+         ++n;
+   }
+}
 
-   virtual double sound(double dTime, double dFrequency) = 0;
-};
 
-struct bell : public instrument
+FTYPE MakeNoise(int nChannel, double dTime)
 {
-   bell()
+   unique_lock<mutex> lm(muxNotes);
+   FTYPE dMixedOutput = 0.0;
+
+   for (auto &n : vecNotes)
    {
-      env.dAttackTime = 0.01;
-      env.dDecayTime = 1.0;
-      env.dStartAmplitude = 1.0;
-      env.dSustainAmplitude = 0.0;
-      env.dReleaseTime = 1.0;
-      env.dTriggerOnTime = 0.0;
-      env.dTriggerOffTime = 0.0;
+      bool bNoteFinished = false;
+      FTYPE dSound = 0;
+      if (n.channel == 2)
+         dSound = instBell.sound(dTime, n, bNoteFinished);
+      if (n.channel == 1)
+         dSound = instHarm.sound(dTime, n, bNoteFinished) * 0.5;
+      
+      dMixedOutput += dSound;
+
+      if (bNoteFinished && n.off > n.on)
+      {
+         n.active = false;
+      }
    }
 
-   double sound(double dTime, double dFrequency)
-   {
-      double dOutput = env.GetAmplitude(dTime) *
-         (
-            +1.0 * osc(dFrequency * 2.0, dTime, OSC_SINE, 5.0, 0.001)
-            + 0.5 * osc(dFrequency * 3.0, dTime, OSC_SINE)
-            + 0.25 * osc(dFrequency * 4.0, dTime, OSC_SINE)
-          );
+   safe_remove<vector<synth::note>>(vecNotes,
+      [](synth::note const& item) { return item.active; });
 
-      return dOutput;
-   }
-};
-
-struct harmonica : public instrument
-{
-   harmonica()
-   {
-      env.dAttackTime = 0.01;
-      env.dDecayTime = 1.0;
-      env.dStartAmplitude = 1.0;
-      env.dSustainAmplitude = 0.0;
-      env.dReleaseTime = 1.0;
-      env.dTriggerOnTime = 0.0;
-      env.dTriggerOffTime = 0.0;
-   }
-
-   double sound(double dTime, double dFrequency)
-   {
-      double dOutput = env.GetAmplitude(dTime) *
-         (
-            +1.0 * osc(dFrequency, dTime, OSC_SQUARE, 5.0, 0.001)
-            + 0.5 * osc(dFrequency * 1.5, dTime, OSC_SQUARE)
-            + 0.25 * osc(dFrequency * 2.0, dTime, OSC_SQUARE)
-            + 0.05 * osc(0, dTime, OSC_NOISE)
-            );
-
-      return dOutput;
-   }
-};
-
-atomic<double> dFrequencyOutput = 0.0;
-double dOctaveBaseFrequency = 220.0;   // A3
-double d12thRootOf2 = pow(2.0, 1.0 / 12.0);
-sEnvelopeADSR envelope;
-
-instrument *voice = nullptr;
-
-double MakeNoise(double dTime)
-{
-   double dOutput = voice->sound(dTime, dFrequencyOutput);
-   return dOutput * 0.4;
+   return dMixedOutput * 0.2;
 }
 
 int main()
 {
-   wcout << "Synthesizer" << endl;
+   // Shameless self-promotion
+   wcout << "www.OneLoneCoder.com - Synthesizer Part 3" << endl << "Multiple Oscillators with Polyphony" << endl << endl;
 
-   // get all sound hardware
+   // Get all sound hardware
    vector<wstring> devices = olcNoiseMaker<short>::Enumerate();
 
-   // display findings
-   //for (auto d : devices)
-   //   wcout << "Found output device:" << d << endl;
+   // Display findings
+   //for (auto d : devices) wcout << "Found Output Device: " << d << endl;
+   //wcout << "Using Device: " << devices[0] << endl;
 
-   // create noise machine
+   // Display a keyboard
+   wcout << endl <<
+      "|   |   |   |   |   | |   |   |   |   | |   | |   |   |   |" << endl <<
+      "|   | S |   |   | F | | G |   |   | J | | K | | L |   |   |" << endl <<
+      "|   |___|   |   |___| |___|   |   |___| |___| |___|   |   |__" << endl <<
+      "|     |     |     |     |     |     |     |     |     |     |" << endl <<
+      "|  Z  |  X  |  C  |  V  |  B  |  N  |  M  |  ,  |  .  |  /  |" << endl <<
+      "|_____|_____|_____|_____|_____|_____|_____|_____|_____|_____|" << endl << endl;
+
+
+   // Create sound machine!!
    olcNoiseMaker<short> sound(devices[0], 44100, 1, 8, 512);
 
-   //voice = new bell();
-   voice = new harmonica();
-
-   // link noise function with sound machine
+   // Link noise function with sound machine
    sound.SetUserFunction(MakeNoise);
 
-   // keyboard
-   int nCurrentKey = -1;
-   bool bKeyPressed = false;
+   char keyboard[129];
+   memset(keyboard, ' ', 127);
+   keyboard[128] = '\0';
+
+   auto clock_old_time = chrono::high_resolution_clock::now();
+   auto clock_real_time = chrono::high_resolution_clock::now();
+   double dElapsedTime = 0.0;
 
    while (1)
    {
-      bKeyPressed = false;
-      for (int k = 0; k < 15; k++)
+      for (int k = 0; k < 16; k++)
       {
-         if (GetAsyncKeyState((unsigned char)("ZSXCFVGBNJMK\xbcL\xbe"[k])) & 0x8000)
+         short nKeyState = GetAsyncKeyState((unsigned char)("ZSXCFVGBNJMK\xbcL\xbe\xbf"[k]));
+
+         double dTimeNow = sound.GetTime();
+
+         // Check if note already exists in currently playing notes
+         muxNotes.lock();
+         auto noteFound = find_if(vecNotes.begin(), vecNotes.end(), [&k](synth::note const& item) { return item.id == k; });
+         if (noteFound == vecNotes.end())
          {
-            if (nCurrentKey != k)
+            // Note not found in vector
+
+            if (nKeyState & 0x8000)
             {
-               dFrequencyOutput = dOctaveBaseFrequency * pow(d12thRootOf2, k);
-               voice->env.NoteOn(sound.GetTime());
-               wcout << "\rNote On: " << sound.GetTime() << "s " << dFrequencyOutput << "Hz";
-               nCurrentKey = k;
+               // Key has been pressed so create a new note
+               synth::note n;
+               n.id = k;
+               n.on = dTimeNow;
+               n.channel = 1;
+               n.active = true;
+
+               // Add note to vector
+               vecNotes.emplace_back(n);
             }
-
-            bKeyPressed = true;
+            else
+            {
+               // Note not in vector, but key has been released...
+               // ...nothing to do
+            }
          }
-      }
-
-      if (!bKeyPressed)
-      {
-         if (nCurrentKey != -1)
+         else
          {
-            wcout << "\rNote Off: " << sound.GetTime() << "s                              ";
-            voice->env.NoteOff(sound.GetTime());
-            nCurrentKey = -1;
+            // Note exists in vector
+            if (nKeyState & 0x8000)
+            {
+               // Key is still held, so do nothing
+               if (noteFound->off > noteFound->on)
+               {
+                  // Key has been pressed again during release phase
+                  noteFound->on = dTimeNow;
+                  noteFound->active = true;
+               }
+            }
+            else
+            {
+               // Key has been released, so switch off
+               if (noteFound->off < noteFound->on)
+               {
+                  noteFound->off = dTimeNow;
+               }
+            }
          }
+         muxNotes.unlock();
       }
+      wcout << "\rNotes: " << vecNotes.size() << "    ";
+
+      //this_thread::sleep_for(5ms);
    }
 
    return 0;
